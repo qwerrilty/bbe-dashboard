@@ -19,46 +19,49 @@ export default function Login() {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      minHeight: '100vh', background: 'var(--bg2)',
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #F5EDD8 0%, #f0e8d8 50%, #e8dcc8 100%)',
     }}>
       <div style={{
-        background: 'var(--bg)', border: '0.5px solid var(--border)',
-        borderRadius: 16, padding: '48px 40px', maxWidth: 360, width: '100%',
+        background: '#fff', border: '1px solid var(--border)',
+        borderRadius: 20, padding: '48px 44px', maxWidth: 400, width: '100%',
+        boxShadow: '0 20px 60px rgba(74,42,28,0.15)',
       }}>
-        <div style={{
-          width: 48, height: 48, background: '#1a6b8a', borderRadius: 12,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#fff', fontSize: 22, margin: '0 auto 20px',
-        }}>♪</div>
-        <h1 style={{ fontFamily: 'Georgia, serif', fontSize: 22, marginBottom: 8, color: 'var(--text)', textAlign: 'center' }}>
-          Byron Bay Experience
-        </h1>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <img src="/logo.png" alt="Byron Bay Experience" style={{ height: 90, width: 'auto', objectFit: 'contain' }} />
+        </div>
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 28, textAlign: 'center' }}>
-          Team operations dashboard
+          Team operations dashboard — sign in to continue
         </p>
-        <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Email</label>
+        <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Email</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)}
               placeholder="you@example.com" required autoFocus />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Password</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Password</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)}
               placeholder="••••••••" required />
           </div>
           {error && (
-            <div style={{ fontSize: 12, color: '#c94f2e', background: '#fdf0ec', padding: '8px 12px', borderRadius: 6 }}>
+            <div style={{ fontSize: 12, color: 'var(--terracotta-text)', background: 'var(--terracotta-bg)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--terracotta)' }}>
               {error}
             </div>
           )}
           <button type="submit" disabled={loading} style={{
-            marginTop: 4, padding: '11px 20px', fontSize: 14, fontFamily: 'inherit',
-            background: '#1a6b8a', color: '#fff', border: 'none', borderRadius: 7, cursor: 'pointer',
+            marginTop: 6, padding: '12px 20px', fontSize: 14, fontFamily: 'var(--sans)',
+            background: 'var(--terracotta)', color: '#fff',
+            border: 'none', borderRadius: 9, cursor: 'pointer', fontWeight: 600,
+            boxShadow: '0 4px 14px rgba(201,90,53,0.3)',
+            transition: 'opacity 0.15s',
           }}>
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
+        <div style={{ textAlign: 'center', marginTop: 24, fontSize: 11, color: 'var(--muted)' }}>
+          Entertainment · sorted ✦
+        </div>
       </div>
     </div>
   )
