@@ -9,6 +9,8 @@ import EventRecord from './pages/EventRecord'
 import NewBooking from './pages/NewBooking'
 import Performers from './pages/Performers'
 import Inbox from './pages/Inbox'
+import CalendarPage from './pages/CalendarPage'
+import KanbanPage from './pages/KanbanPage'
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -19,19 +21,15 @@ export default function App() {
       setSession(session)
       setLoading(false)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s)
-    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
     return () => subscription.unsubscribe()
   }, [])
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: 'var(--muted)', fontSize: 13 }}>
-        Loading...
-      </div>
-    )
-  }
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: 'var(--muted)', fontSize: 13 }}>
+      Loading...
+    </div>
+  )
 
   if (!session) return <Login />
 
@@ -45,6 +43,8 @@ export default function App() {
           <Route path="bookings/:id" element={<EventRecord />} />
           <Route path="performers" element={<Performers />} />
           <Route path="inbox" element={<Inbox />} />
+          <Route path="calendar" element={<CalendarPage />} />
+          <Route path="kanban" element={<KanbanPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
