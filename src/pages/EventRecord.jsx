@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
+import EmailButton from '../components/EmailButton'
+import { buildCallSheetEmail } from '../lib/email'
 
 const STAGES = ['Enquiry', 'Logged to Sheets', 'Calendar created', 'Performers locked', 'Info complete', 'Call sheet sent', 'Done']
 const PERFORMER_TYPES = ['Solo act', 'Duo', 'Band', 'DJ', 'Roving / circus', 'Interactive', 'Other']
@@ -199,7 +202,14 @@ export default function EventRecord() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" onClick={saveBooking} disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</button>
           <button className="btn" onClick={generateCallSheet}>↓ Download call sheet</button>
-          <button className="btn btn-primary">Send to performers</button>
+          <EmailButton
+            label="✉ Send to performers"
+            to={performers.filter(p => p.email).map(p => p.email)}
+            subject={buildCallSheetEmail(booking, performers).subject}
+            body={buildCallSheetEmail(booking, performers).body}
+            bookingId={booking.id}
+            type="call_sheet"
+          />
         </div>
       </div>
 
