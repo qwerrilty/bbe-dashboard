@@ -11,6 +11,7 @@ import Performers from './pages/Performers'
 import Inbox from './pages/Inbox'
 import CalendarPage from './pages/CalendarPage'
 import KanbanPage from './pages/KanbanPage'
+import Settings from './pages/Settings'
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -18,15 +19,14 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoading(false)
+      setSession(session); setLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
     return () => subscription.unsubscribe()
   }, [])
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: 'var(--muted)', fontSize: 13 }}>
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', color:'var(--muted)', fontSize:13 }}>
       Loading...
     </div>
   )
@@ -45,6 +45,7 @@ export default function App() {
           <Route path="inbox" element={<Inbox />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="kanban" element={<KanbanPage />} />
+          <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>
     </BrowserRouter>

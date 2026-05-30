@@ -25,6 +25,7 @@ export default function Layout({ session }) {
         boxShadow: 'var(--shadow-sm)',
         position: 'sticky', top: 0, zIndex: 100,
       }}>
+        {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <img src="/logo.png" alt="Byron Bay Experience" style={{ height: 44, width: 'auto', objectFit: 'contain' }} />
           <div style={{ width: 1, height: 30, background: 'var(--border-mid)' }} />
@@ -35,8 +36,11 @@ export default function Layout({ session }) {
             <NavLink to="/kanban" style={navStyle}>Pipeline</NavLink>
             <NavLink to="/performers" style={navStyle}>Performers</NavLink>
             <NavLink to="/inbox" style={navStyle}>Inbox</NavLink>
+            <NavLink to="/settings" style={navStyle}>Settings</NavLink>
           </nav>
         </div>
+
+        {/* User */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
             width: 30, height: 30, borderRadius: '50%',

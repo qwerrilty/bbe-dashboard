@@ -177,8 +177,7 @@ export default function EventRecord() {
           <EmailButton
             label="✉ Send to performers"
             to={performers.filter(p => p.email).map(p => p.email)}
-            subject={buildCallSheetEmail(booking, performers).subject}
-            body={buildCallSheetEmail(booking, performers).body}
+            getContent={async () => await buildCallSheetEmail(booking, performers)}
             bookingId={booking.id}
             type="call_sheet"
           />
