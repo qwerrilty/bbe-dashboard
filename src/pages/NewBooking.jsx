@@ -77,7 +77,13 @@ export default function NewBooking() {
           </div>
           <div className="field">
             <label>Event date</label>
-            <input type="date" value={form.event_date} onChange={set('event_date')} />
+            <input
+              type="date"
+              defaultValue={form.event_date}
+              onChange={set('event_date')}
+              min="2024-01-01"
+              max="2030-12-31"
+            />
           </div>
           <div className="field">
             <label>Guest numbers (pax)</label>
