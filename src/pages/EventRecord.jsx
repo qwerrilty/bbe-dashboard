@@ -1,10 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 import EmailButton from '../components/EmailButton'
 import { buildCallSheetEmail } from '../lib/email'
 
+const STAGES = ['Enquiry','Logged','Calendar','Performers','Info complete','Call sheet sent','Done']
+const PERFORMER_TYPES = ['Solo act','Duo','Band','DJ','Roving / circus','Interactive','Other']
+
+const DEFAULT_CHECKLIST = [
+  { key: 'chk_callsheet',  label: 'Call sheet sent',            group: 'Admin & Finance' },
+  { key: 'chk_invoice',    label: 'Invoice sent',               group: 'Admin & Finance' },
+  { key: 'chk_deposit',    label: 'Deposit received',           group: 'Admin & Finance' },
+  { key: 'chk_pif',        label: 'PIF — paid in full',         group: 'Admin & Finance' },
+  { key: 'chk_agreement',  label: 'Booking agreement signed',   group: 'Admin & Finance' },
+  { key: 'chk_apra',       label: 'APRA sorted',                group: 'Admin & Finance' },
+  { key: 'chk_velocity',   label: 'Velocity number noted',      group: 'Admin & Finance' },
+  { key: 'chk_referral',   label: 'Referral source noted',      group: 'Admin & Finance' },
+  { key: 'chk_music',      label: 'Music checklist done',       group: 'Event prep' },
+  { key: 'chk_songreq',    label: 'Song requests received',     group: 'Event prep' },
+  { key: 'chk_runsheet',   label: 'Run sheet finalised',        group: 'Event prep' },
+  { key: 'chk_techspecs',  label: 'Tech specs confirmed',       group: 'Event prep' },
+  { key: 'chk_meals',      label: 'Meals organised',            group: 'Event prep' },
+  { key: 'chk_dietary',    label: 'Dietary requirements noted', group: 'Event prep' },
+  { key: 'chk_accom',      label: 'Accommodation / flights booked', group: 'Event prep' },
+  { key: 'chk_bbe_review', label: 'BBE review done',            group: 'Reviews' },
+  { key: 'chk_mrs_review', label: 'MRS review done',            group: 'Reviews' },
+]
+
+// Section is defined OUTSIDE the component so it is never recreated on keystrokes
 function Section({ sid, title, badge, open, setOpen, children }) {
   const isOpen = open[sid] !== false
   return (
@@ -22,8 +45,13 @@ function Section({ sid, title, badge, open, setOpen, children }) {
   )
 }
 
-const STAGES = ['Enquiry', 'Logged to Sheets', 'Calendar created', 'Performers locked', 'Info complete', 'Call sheet sent', 'Done']
-const PERFORMER_TYPES = ['Solo act', 'Duo', 'Band', 'DJ', 'Roving / circus', 'Interactive', 'Other']
+function statusStyle(s) {
+  return {
+    yes: { bg: 'var(--teal-bg)',       color: 'var(--teal-text)',       border: 'var(--teal)' },
+    no:  { bg: 'var(--terracotta-bg)', color: 'var(--terracotta-text)', border: 'var(--terracotta)' },
+    nr:  { bg: 'var(--gold-bg)',       color: 'var(--gold-text)',       border: 'var(--gold)' },
+  }[s] || { bg: 'var(--bg2)', color: 'var(--muted)', border: 'var(--border-mid)' }
+}
 
 export default function EventRecord() {
   const { id } = useParams()
@@ -31,42 +59,56 @@ export default function EventRecord() {
   const [booking, setBooking] = useState(null)
   const [performers, setPerformers] = useState([])
   const [runsheet, setRunsheet] = useState([])
-  const [checklist, setChecklist] = useState([])
   const [saving, setSaving] = useState(false)
-  const [activeSection, setActiveSection] = useState(null)
+  const [open, setOpen] = useState({
+    performers: true, venue: true, brief: true,
+    runsheet: true, songs: false, greenroom: true,
+    travel: false, checklist: true,
+  })
 
   useEffect(() => {
-    if (!id || id === 'new') return
+    if (!id) return
     const load = async () => {
-      const [b, p, r, c] = await Promise.all([
+      const [b, p, r] = await Promise.all([
         supabase.from('bookings').select('*').eq('id', id).single(),
         supabase.from('performers').select('*').eq('booking_id', id).order('created_at'),
         supabase.from('runsheet_items').select('*').eq('booking_id', id).order('time'),
-        supabase.from('checklist_items').select('*').eq('booking_id', id).order('created_at'),
       ])
       if (b.data) setBooking(b.data)
       setPerformers(p.data || [])
       setRunsheet(r.data || [])
-      setChecklist(c.data || [])
     }
     load()
+  }, [id])
 
-    // Realtime subscription
-    const sub = supabase.channel(`booking-${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'performers', filter: `booking_id=eq.${id}` }, () => {
-        supabase.from('performers').select('*').eq('booking_id', id).then(({ data }) => setPerformers(data || []))
-      })
-      .subscribe()
-    return () => supabase.removeChannel(sub)
+  // Update local state only while typing — saves to DB on blur, so no re-render mid-type
+  const setField = useCallback((key) => (e) => {
+    const val = e.target ? e.target.value : e
+    setBooking(prev => ({ ...prev, [key]: val }))
+  }, [])
+
+  const saveField = useCallback((key) => async (e) => {
+    const val = e.target ? e.target.value : e
+    await supabase.from('bookings').update({ [key]: val }).eq('id', id)
+  }, [id])
+
+  const toggleCheck = useCallback(async (key) => {
+    setBooking(prev => {
+      const newVal = !prev[key]
+      const updated = { ...prev, [key]: newVal }
+      const missing = DEFAULT_CHECKLIST.filter(c => !updated[c.key]).length
+      updated.missing_count = missing
+      supabase.from('bookings').update({ [key]: newVal, missing_count: missing }).eq('id', id)
+      return updated
+    })
   }, [id])
 
   const saveBooking = async () => {
     setSaving(true)
-    await supabase.from('bookings').update(booking).eq('id', id)
+    const missing = DEFAULT_CHECKLIST.filter(c => !booking[c.key]).length
+    await supabase.from('bookings').update({ ...booking, missing_count: missing }).eq('id', id)
     setSaving(false)
   }
-
-  const setField = (key, val) => setBooking(b => ({ ...b, [key]: val }))
 
   const updatePerformer = async (pid, key, val) => {
     setPerformers(ps => ps.map(p => p.id === pid ? { ...p, [key]: val } : p))
@@ -75,7 +117,7 @@ export default function EventRecord() {
 
   const addPerformer = async () => {
     const { data } = await supabase.from('performers').insert([{
-      booking_id: id, name: 'New performer', type: 'Solo act', status: 'nr', fee: 0,
+      booking_id: id, name: '', type: 'Solo act', status: 'nr', fee: 0, time_slot: '',
     }]).select().single()
     if (data) setPerformers(ps => [...ps, data])
   }
@@ -102,106 +144,78 @@ export default function EventRecord() {
     setRunsheet(rs => rs.filter(r => r.id !== rid))
   }
 
-  const toggleChecklistItem = async (item) => {
-    const updated = { ...item, completed: !item.completed }
-    setChecklist(cs => cs.map(c => c.id === item.id ? updated : c))
-    await supabase.from('checklist_items').update({ completed: updated.completed }).eq('id', item.id)
-    // Update missing count
-    const newMissing = checklist.filter(c => c.id !== item.id ? !c.completed : item.completed).length
-    await supabase.from('bookings').update({ missing_count: newMissing }).eq('id', id)
-  }
-
-  const addChecklistItem = async () => {
-    const { data } = await supabase.from('checklist_items').insert([{
-      booking_id: id, label: 'New item', completed: false, owner: '',
-    }]).select().single()
-    if (data) setChecklist(cs => [...cs, data])
-  }
-
   const generateCallSheet = () => {
     if (!booking) return
     const lines = [
-      `CALL SHEET — Byron Bay Experience`,
-      `${'─'.repeat(44)}`,
-      `EVENT:     ${booking.client_name} — ${booking.event_type}`,
-      `VENUE:     ${booking.venue || '—'}`,
-      `DATE:      ${booking.event_date ? new Date(booking.event_date).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '—'}`,
-      `PAX:       ${booking.pax || '—'} guests`,
-      `DRESS:     ${booking.dress_code || '—'}`,
-      ``,
-      `ON THE DAY CONTACT`,
-      `  ${booking.on_day_contact || 'Renee · 0403 769 229'}`,
-      ``,
-      `${'─'.repeat(20)} SCHEDULE ${'─'.repeat(15)}`,
-      `BUMP IN:   ${booking.bump_in_time || '—'}`,
-      `GUESTS:    ${booking.guest_arrival_time || '—'}`,
-      ``,
-      ...runsheet.map(r => `${(r.time || '—').padEnd(9)} ${r.item}${r.duration ? ` (${r.duration})` : ''}`),
-      ``,
-      `${'─'.repeat(20)} PERFORMERS ${'─'.repeat(13)}`,
-      ...performers.map(p => `${p.name} — ${p.type} · Status: ${p.status?.toUpperCase() || 'NR'} · Fee: $${p.fee || '—'}`),
-      ``,
-      `${'─'.repeat(20)} GREEN ROOM ${'─'.repeat(14)}`,
-      booking.greenroom_location || '—',
-      booking.greenroom_notes || '',
-      ``,
-      `${'─'.repeat(20)} TRAVEL ${'─'.repeat(17)}`,
-      booking.travel_notes || '—',
-      ``,
-      `${'─'.repeat(20)} SONG REQUESTS ${'─'.repeat(11)}`,
+      `CALL SHEET — Byron Bay Experience`, `${'─'.repeat(46)}`,
+      `EVENT:      ${booking.client_name} — ${booking.event_type}`,
+      `VENUE:      ${booking.venue || '—'}`,
+      `DATE:       ${booking.event_date ? new Date(booking.event_date).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '—'}`,
+      `PAX:        ${booking.pax || '—'} guests`,
+      `DRESS CODE: ${booking.dress_code || '—'}`, ``,
+      `ON THE DAY: ${booking.on_day_contact || 'Renee · 0403 769 229'}`, ``,
+      `ACT BOOKED: ${booking.act_booked || '—'}`, ``,
+      `NEED TO BRING`, booking.need_to_bring || '—', ``,
+      `NEED TO LEARN`, booking.need_to_learn || '—', ``,
+      `${'─'.repeat(20)} PERFORMERS ${'─'.repeat(15)}`,
+      ...performers.map(p => `${p.name} — ${p.type}  |  ${(p.status || 'NR').toUpperCase()}  |  Fee: $${p.fee || '—'}  |  ${p.time_slot || ''}`), ``,
+      `${'─'.repeat(20)} SCHEDULE ${'─'.repeat(17)}`,
+      `BUMP IN:    ${booking.bump_in_time || '—'}`,
+      `GUESTS ARR: ${booking.guest_arrival_time || '—'}`, ``,
+      ...runsheet.map(r => `${(r.time || '—').padEnd(9)} ${r.item}${r.duration ? ` (${r.duration})` : ''}`), ``,
+      `${'─'.repeat(20)} CLIENT CONTACT ${'─'.repeat(11)}`,
+      `Name:  ${booking.client_contact_name || '—'}`,
+      `Email: ${booking.client_email || '—'}`,
+      `Phone: ${booking.client_phone || '—'}`,
+      `About: ${booking.about_client || '—'}`, ``,
+      `${'─'.repeat(20)} GREEN ROOM ${'─'.repeat(16)}`,
+      booking.greenroom_location || '—', booking.greenroom_notes || '', ``,
+      `CREW MEALS: ${booking.crew_meals || '—'}`,
+      `DJ TABLE:   ${booking.dj_table_power || '—'}`, ``,
+      `${'─'.repeat(20)} SONG REQUESTS ${'─'.repeat(13)}`,
       booking.song_requests || '—',
       booking.spotify_link ? `Spotify: ${booking.spotify_link}` : '',
-      booking.do_not_play ? `Do not play: ${booking.do_not_play}` : '',
-      ``,
-      `${'─'.repeat(20)} CREW MEALS ${'─'.repeat(13)}`,
-      booking.crew_meals || '—',
-      ``,
-      `${'─'.repeat(20)} DJ TABLE & POWER ${'─'.repeat(7)}`,
-      booking.dj_table_power || '—',
-      `${'─'.repeat(44)}`,
+      booking.do_not_play ? `Do not play: ${booking.do_not_play}` : '', ``,
+      `${'─'.repeat(20)} TRAVEL ${'─'.repeat(19)}`,
+      booking.travel_notes || '—', `${'─'.repeat(46)}`,
     ]
-    const missing = checklist.filter(c => !c.completed)
-    if (missing.length > 0) {
-      lines.push(``, `⚠  STILL MISSING:`, ...missing.map(m => `   • ${m.label}`))
-    }
+    const missing = DEFAULT_CHECKLIST.filter(c => !booking[c.key])
+    if (missing.length > 0) lines.push(``, `⚠  STILL MISSING:`, ...missing.map(m => `   • ${m.label}`))
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
+    a.href = URL.createObjectURL(blob)
     a.download = `call-sheet-${(booking.client_name || 'event').replace(/\s+/g, '-').toLowerCase()}.txt`
     a.click()
   }
 
-  const statusColors = { yes: 'var(--green)', no: 'var(--coral)', nr: 'var(--gold)' }
-  const statusBg = { yes: 'var(--green-bg)', no: 'var(--coral-bg)', nr: 'var(--gold-bg)' }
-  const statusText = { yes: 'var(--green-text)', no: 'var(--coral-text)', nr: 'var(--gold-text)' }
+  if (!booking) return <div style={{ padding: 60, textAlign: 'center', color: 'var(--muted)' }}>Loading...</div>
 
-  
+  const checkedCount = DEFAULT_CHECKLIST.filter(c => booking[c.key]).length
+  const totalCount = DEFAULT_CHECKLIST.length
+  const pct = Math.round((checkedCount / totalCount) * 100)
 
-  if (!booking) return <div style={{ padding: 40, color: 'var(--muted)', fontSize: 13 }}>Loading...</div>
-
-  const missingCount = checklist.filter(c => !c.completed).length
-  const pendingPerformers = performers.filter(p => p.status === 'nr').length
+  const checklistGroups = DEFAULT_CHECKLIST.reduce((acc, item) => {
+    if (!acc[item.group]) acc[item.group] = []
+    acc[item.group].push(item)
+    return acc
+  }, {})
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+    <div style={{ maxWidth: 900, margin: '0 auto' }}>
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <button className="btn" onClick={() => nav('/bookings')} style={{ marginBottom: 8, padding: '5px 10px', fontSize: 12 }}>← All bookings</button>
-          <h1 style={{ fontFamily: 'var(--serif)', fontSize: 20, fontWeight: 600, color: 'var(--text)' }}>
-            {booking.client_name} — {booking.event_type}
-          </h1>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <span>{booking.venue}</span>
-            <span>{booking.event_date ? new Date(booking.event_date).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '—'}</span>
-            <span>{booking.pax} pax</span>
-            {missingCount > 0 && <span className="badge badge-no">{missingCount} missing</span>}
+          <button className="btn" onClick={() => nav('/bookings')} style={{ marginBottom: 10, fontSize: 12, padding: '5px 10px' }}>← All bookings</button>
+          <h1 className="section-heading">{booking.client_name} — {booking.event_type}</h1>
+          <div style={{ display: 'flex', gap: 14, marginTop: 6, flexWrap: 'wrap', fontSize: 13, color: 'var(--muted)' }}>
+            <span>{booking.venue || 'No venue set'}</span><span>·</span>
+            <span>{booking.event_date ? new Date(booking.event_date).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : 'No date set'}</span><span>·</span>
+            <span>{booking.pax ? `${booking.pax} pax` : 'Pax TBC'}</span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" onClick={saveBooking} disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</button>
-          <button className="btn" onClick={generateCallSheet}>↓ Download call sheet</button>
+          <button className="btn" onClick={generateCallSheet}>↓ Call sheet</button>
           <EmailButton
             label="✉ Send to performers"
             to={performers.filter(p => p.email).map(p => p.email)}
@@ -213,204 +227,132 @@ export default function EventRecord() {
         </div>
       </div>
 
-      {/* Progress stages */}
-      <div className="card" style={{ marginBottom: 16, overflowX: 'auto' }}>
-        <div style={{ display: 'flex', padding: '12px 18px', gap: 0, minWidth: 560 }}>
+      <div className="card" style={{ marginBottom: 20, padding: '16px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', overflowX: 'auto', gap: 0 }}>
           {STAGES.map((s, i) => {
             const stage = booking.stage || 1
-            const done = i + 1 < stage
-            const active = i + 1 === stage
+            const done = i + 1 < stage, active = i + 1 === stage
             return (
               <div key={s} style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flex: 1 }}>
-                  <div
-                    onClick={() => setField('stage', i + 1)}
-                    style={{
-                      width: 24, height: 24, borderRadius: '50%', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 11, fontWeight: 500,
-                      background: done ? 'var(--green)' : active ? 'var(--ocean)' : 'var(--bg2)',
-                      border: `1.5px solid ${done ? 'var(--green)' : active ? 'var(--ocean)' : 'var(--border-mid)'}`,
-                      color: done || active ? '#fff' : 'var(--muted)',
-                    }}
-                  >
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flex: 1 }}>
+                  <div onClick={() => { setBooking(b => ({ ...b, stage: i + 1 })); supabase.from('bookings').update({ stage: i + 1 }).eq('id', id) }}
+                    style={{ width: 28, height: 28, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600, background: done ? 'var(--teal)' : active ? 'var(--terracotta)' : 'var(--bg2)', border: `2px solid ${done ? 'var(--teal)' : active ? 'var(--terracotta)' : 'var(--border-mid)'}`, color: done || active ? '#fff' : 'var(--muted)', boxShadow: active ? '0 0 0 4px rgba(201,90,53,0.15)' : 'none' }}>
                     {done ? '✓' : i + 1}
                   </div>
-                  <div style={{ fontSize: 10, color: active ? 'var(--ocean)' : 'var(--muted)', fontWeight: active ? 500 : 400, textAlign: 'center', whiteSpace: 'nowrap' }}>{s}</div>
+                  <div style={{ fontSize: 10, color: active ? 'var(--terracotta)' : done ? 'var(--teal)' : 'var(--muted)', fontWeight: active || done ? 600 : 400, textAlign: 'center', whiteSpace: 'nowrap' }}>{s}</div>
                 </div>
-                {i < STAGES.length - 1 && (
-                  <div style={{ height: 1, width: 20, background: done ? 'var(--green)' : 'var(--border-mid)', flexShrink: 0, marginBottom: 16 }} />
-                )}
+                {i < STAGES.length - 1 && <div style={{ height: 2, width: 24, background: done ? 'var(--teal)' : 'var(--border)', flexShrink: 0, marginBottom: 18, borderRadius: 1 }} />}
               </div>
             )
           })}
         </div>
       </div>
 
-      {/* Missing items alert */}
-      {missingCount > 0 && (
-        <div style={{ background: 'var(--gold-bg)', border: '0.5px solid var(--gold)', borderRadius: 8, padding: '10px 16px', marginBottom: 14, display: 'flex', gap: 8, fontSize: 13, color: 'var(--gold-text)' }}>
-          <span>⚠</span>
-          <span><strong>{missingCount} item{missingCount > 1 ? 's' : ''} still missing</strong> — call sheet should not be sent until these are resolved.</span>
+      <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Booking completion</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: pct === 100 ? 'var(--teal)' : pct > 60 ? 'var(--gold)' : 'var(--terracotta)' }}>{checkedCount}/{totalCount} — {pct}%</div>
         </div>
-      )}
+        <div style={{ height: 8, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${pct}%`, borderRadius: 4, transition: 'width 0.4s', background: pct === 100 ? 'var(--teal)' : pct > 60 ? 'var(--gold)' : 'var(--terracotta)' }} />
+        </div>
+      </div>
 
-      {/* Performers */}
-      <Section id="performers" title="Act booked & performers" badge={pendingPerformers > 0 ? <span className="badge badge-warn">{pendingPerformers} pending</span> : null}>
+      <Section open={open} setOpen={setOpen} sid="performers" title="Act booked & performers"
+        badge={performers.filter(p => p.status === 'nr').length > 0 ? <span className="badge badge-warn">{performers.filter(p => p.status === 'nr').length} pending</span> : null}>
         <div className="grid-2">
-          <div className="field">
-            <label>Act booked (summary)</label>
-            <input value={booking.act_booked || ''} onChange={e => setField('act_booked', e.target.value)} placeholder="e.g. Band + DJ + Circus roving" />
-          </div>
-          <div className="field">
-            <label>Booked by</label>
-            <input value={booking.booked_by || ''} onChange={e => setField('booked_by', e.target.value)} placeholder="Renee" />
-          </div>
-          <div className="field">
-            <label>Platform booked via</label>
-            <select value={booking.booking_platform || 'Direct'} onChange={e => setField('booking_platform', e.target.value)}>
+          <div className="field"><label>Act booked (summary)</label><input value={booking.act_booked || ''} onChange={setField('act_booked')} onBlur={saveField('act_booked')} placeholder="e.g. Band + DJ + Circus" /></div>
+          <div className="field"><label>Booked by</label><input value={booking.booked_by || ''} onChange={setField('booked_by')} onBlur={saveField('booked_by')} placeholder="Renee" /></div>
+          <div className="field"><label>Platform booked via</label>
+            <select value={booking.booking_platform || 'Direct / email'} onChange={e => { setField('booking_platform')(e); saveField('booking_platform')(e) }}>
               {['Direct / email', 'Referral', 'Airtasker', 'GigSalad', 'Other'].map(p => <option key={p}>{p}</option>)}
             </select>
           </div>
-          <div className="field">
-            <label>Date locked in</label>
-            <input type="date" value={booking.locked_date || ''} onChange={e => setField('locked_date', e.target.value)} />
-          </div>
+          <div className="field"><label>Date locked in</label><input type="date" defaultValue={booking.locked_date || ''} onBlur={saveField('locked_date')} /></div>
+        </div>
+        <div className="grid-2">
+          <div className="field"><label>Need to bring</label><textarea value={booking.need_to_bring || ''} onChange={setField('need_to_bring')} onBlur={saveField('need_to_bring')} placeholder="e.g. PA, mic stand, cables..." style={{ minHeight: 72 }} /></div>
+          <div className="field"><label>Need to learn</label><textarea value={booking.need_to_learn || ''} onChange={setField('need_to_learn')} onBlur={saveField('need_to_learn')} placeholder="e.g. First dance song..." style={{ minHeight: 72 }} /></div>
         </div>
         <hr className="divider" />
-        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginBottom: 6 }}>PERFORMERS</div>
-        <div style={{ border: '0.5px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-          {performers.length === 0 && (
-            <div style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>No performers added yet.</div>
-          )}
-          {performers.map((p, i) => (
-            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: i < performers.length - 1 ? '0.5px solid var(--border)' : 'none', flexWrap: 'wrap' }}>
-              <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--ocean-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 500, color: 'var(--ocean-text)', flexShrink: 0 }}>
-                {(p.name || '?').slice(0, 2).toUpperCase()}
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Performers locked in</div>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+          {performers.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>No performers yet.</div>}
+          {performers.map((p, i) => {
+            const ss = statusStyle(p.status)
+            return (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: i < performers.length - 1 ? '1px solid var(--border)' : 'none', flexWrap: 'wrap', background: 'var(--bg)' }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--terracotta-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600, color: 'var(--terracotta-text)', flexShrink: 0 }}>
+                  {(p.name || '?').slice(0, 2).toUpperCase()}
+                </div>
+                <input defaultValue={p.name || ''} onBlur={e => updatePerformer(p.id, 'name', e.target.value)} placeholder="Performer name" style={{ width: 130, flex: '0 0 130px', fontSize: 13 }} />
+                <input defaultValue={p.email || ''} onBlur={e => updatePerformer(p.id, 'email', e.target.value)} placeholder="email@..." style={{ width: 130, flex: '0 0 130px', fontSize: 13 }} />
+                <select value={p.type || 'Solo act'} onChange={e => updatePerformer(p.id, 'type', e.target.value)} style={{ width: 120, flex: '0 0 120px', fontSize: 13 }}>
+                  {PERFORMER_TYPES.map(t => <option key={t}>{t}</option>)}
+                </select>
+                <input defaultValue={p.time_slot || ''} onBlur={e => updatePerformer(p.id, 'time_slot', e.target.value)} placeholder="8–10pm" style={{ width: 80, flex: '0 0 80px', fontSize: 13 }} />
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {['yes', 'no', 'nr'].map(s => (
+                    <button key={s} onClick={() => updatePerformer(p.id, 'status', s)}
+                      style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: `1.5px solid ${p.status === s ? ss.border : 'var(--border-mid)'}`, background: p.status === s ? ss.bg : 'transparent', color: p.status === s ? ss.color : 'var(--muted)' }}>
+                      {s.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>$</span>
+                  <input type="number" defaultValue={p.fee || ''} onBlur={e => updatePerformer(p.id, 'fee', e.target.value)} placeholder="Fee" style={{ width: 70, fontSize: 13 }} />
+                </div>
+                <button onClick={() => deletePerformer(p.id)} style={{ color: 'var(--muted)', fontSize: 18, background: 'none', border: 'none', cursor: 'pointer', marginLeft: 'auto' }}>×</button>
               </div>
-              <input value={p.name} onChange={e => updatePerformer(p.id, 'name', e.target.value)} style={{ width: 140, flex: '0 0 140px' }} />
-              <select value={p.type} onChange={e => updatePerformer(p.id, 'type', e.target.value)} style={{ width: 130, flex: '0 0 130px' }}>
-                {PERFORMER_TYPES.map(t => <option key={t}>{t}</option>)}
-              </select>
-              <input value={p.time_slot || ''} onChange={e => updatePerformer(p.id, 'time_slot', e.target.value)} placeholder="e.g. 8–10pm" style={{ width: 90, flex: '0 0 90px' }} />
-              <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
-                {['yes', 'no', 'nr'].map(s => (
-                  <button
-                    key={s}
-                    onClick={() => updatePerformer(p.id, 'status', s)}
-                    style={{
-                      padding: '3px 9px', borderRadius: 5, fontSize: 11, fontWeight: 500, cursor: 'pointer',
-                      border: `0.5px solid ${p.status === s ? statusColors[s] : 'var(--border-mid)'}`,
-                      background: p.status === s ? statusBg[s] : 'transparent',
-                      color: p.status === s ? statusText[s] : 'var(--muted)',
-                    }}
-                  >
-                    {s.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>$</span>
-                <input type="number" value={p.fee || ''} onChange={e => updatePerformer(p.id, 'fee', e.target.value)} placeholder="Fee" style={{ width: 80 }} />
-              </div>
-              <button onClick={() => deletePerformer(p.id)} style={{ color: 'var(--muted)', fontSize: 16, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}>×</button>
-            </div>
-          ))}
+            )
+          })}
         </div>
         <button className="btn" onClick={addPerformer} style={{ alignSelf: 'flex-start' }}>+ Add performer</button>
       </Section>
 
-      {/* Venue & contacts */}
-      <Section id="venue" title="Venue & client contacts">
+      <Section open={open} setOpen={setOpen} sid="venue" title="Venue & client contacts">
         <div className="grid-2">
-          <div className="field">
-            <label>Venue name</label>
-            <input value={booking.venue || ''} onChange={e => setField('venue', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Venue address</label>
-            <input value={booking.venue_address || ''} onChange={e => setField('venue_address', e.target.value)} />
-          </div>
+          <div className="field"><label>Venue</label><input value={booking.venue || ''} onChange={setField('venue')} onBlur={saveField('venue')} /></div>
+          <div className="field"><label>Venue address</label><input value={booking.venue_address || ''} onChange={setField('venue_address')} onBlur={saveField('venue_address')} /></div>
         </div>
         <hr className="divider" />
-        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginBottom: 4 }}>CLIENT CONTACT</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Client contact info</div>
         <div className="grid-2">
-          <div className="field">
-            <label>Name</label>
-            <input value={booking.client_contact_name || ''} onChange={e => setField('client_contact_name', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Email</label>
-            <input type="email" value={booking.client_email || ''} onChange={e => setField('client_email', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Phone</label>
-            <input value={booking.client_phone || ''} onChange={e => setField('client_phone', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>About the client</label>
-            <input value={booking.about_client || ''} onChange={e => setField('about_client', e.target.value)} />
-          </div>
+          <div className="field"><label>Name</label><input value={booking.client_contact_name || ''} onChange={setField('client_contact_name')} onBlur={saveField('client_contact_name')} /></div>
+          <div className="field"><label>Email</label><input type="email" value={booking.client_email || ''} onChange={setField('client_email')} onBlur={saveField('client_email')} /></div>
+          <div className="field"><label>Phone</label><input value={booking.client_phone || ''} onChange={setField('client_phone')} onBlur={saveField('client_phone')} /></div>
+          <div className="field"><label>About the client</label><input value={booking.about_client || ''} onChange={setField('about_client')} onBlur={saveField('about_client')} /></div>
         </div>
         <hr className="divider" />
-        <div className="field">
-          <label>On the day contact (BBE)</label>
-          <input value={booking.on_day_contact || ''} onChange={e => setField('on_day_contact', e.target.value)} />
-        </div>
+        <div className="field"><label>On the day contact (BBE)</label><input value={booking.on_day_contact || ''} onChange={setField('on_day_contact')} onBlur={saveField('on_day_contact')} /></div>
       </Section>
 
-      {/* Event brief */}
-      <Section id="brief" title="Event brief">
+      <Section open={open} setOpen={setOpen} sid="brief" title="Event brief">
         <div className="grid-2">
-          <div className="field">
-            <label>Dress code</label>
-            <input value={booking.dress_code || ''} onChange={e => setField('dress_code', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Guest numbers</label>
-            <input type="number" value={booking.pax || ''} onChange={e => setField('pax', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Demographic of guests</label>
-            <input value={booking.demographic || ''} onChange={e => setField('demographic', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Guest arrival time</label>
-            <input type="time" value={booking.guest_arrival_time || ''} onChange={e => setField('guest_arrival_time', e.target.value)} />
-          </div>
+          <div className="field"><label>Dress code</label><input value={booking.dress_code || ''} onChange={setField('dress_code')} onBlur={saveField('dress_code')} /></div>
+          <div className="field"><label>Guest numbers</label><input type="number" value={booking.pax || ''} onChange={setField('pax')} onBlur={saveField('pax')} /></div>
+          <div className="field"><label>Demographic of guests</label><input value={booking.demographic || ''} onChange={setField('demographic')} onBlur={saveField('demographic')} /></div>
+          <div className="field"><label>Guest arrival time</label><input type="time" value={booking.guest_arrival_time || ''} onChange={setField('guest_arrival_time')} onBlur={saveField('guest_arrival_time')} /></div>
         </div>
-        <div className="field">
-          <label>Event brief / vibe</label>
-          <textarea value={booking.event_brief || ''} onChange={e => setField('event_brief', e.target.value)} />
-        </div>
+        <div className="field"><label>Event brief / vibe</label><textarea value={booking.event_brief || ''} onChange={setField('event_brief')} onBlur={saveField('event_brief')} /></div>
       </Section>
 
-      {/* Run sheet */}
-      <Section id="runsheet" title="Run sheet & performance times">
+      <Section open={open} setOpen={setOpen} sid="runsheet" title="Run sheet & performance times">
         <div className="grid-2">
-          <div className="field">
-            <label>Bump in time</label>
-            <input type="time" value={booking.bump_in_time || ''} onChange={e => setField('bump_in_time', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Sound check by</label>
-            <input type="time" value={booking.soundcheck_time || ''} onChange={e => setField('soundcheck_time', e.target.value)} />
-          </div>
+          <div className="field"><label>Bump in time</label><input type="time" value={booking.bump_in_time || ''} onChange={setField('bump_in_time')} onBlur={saveField('bump_in_time')} /></div>
+          <div className="field"><label>Sound check by</label><input type="time" value={booking.soundcheck_time || ''} onChange={setField('soundcheck_time')} onBlur={saveField('soundcheck_time')} /></div>
         </div>
-        <div style={{ border: '0.5px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 90px 36px', gap: 0, background: 'var(--bg2)', borderBottom: '0.5px solid var(--border)', padding: '7px 12px' }}>
-            {['Time', 'Item / performer', 'Duration', ''].map(h => (
-              <div key={h} style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</div>
-            ))}
+        <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 100px 36px', background: 'var(--bg2)', borderBottom: '1px solid var(--border)', padding: '8px 14px' }}>
+            {['Time', 'Item / performer', 'Duration', ''].map(h => <div key={h} style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</div>)}
           </div>
-          {runsheet.length === 0 && (
-            <div style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>No run sheet items yet.</div>
-          )}
+          {runsheet.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>No items yet.</div>}
           {runsheet.map(r => (
-            <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 90px 36px', gap: 0, borderBottom: '0.5px solid var(--border)', padding: '4px 6px', alignItems: 'center' }}>
-              <input value={r.time || ''} onChange={e => updateRunsheet(r.id, 'time', e.target.value)} placeholder="19:00" style={{ borderRadius: 4, padding: '5px 6px', fontSize: 12 }} />
-              <input value={r.item || ''} onChange={e => updateRunsheet(r.id, 'item', e.target.value)} placeholder="Item or performer name" style={{ borderRadius: 4, padding: '5px 6px', fontSize: 12 }} />
-              <input value={r.duration || ''} onChange={e => updateRunsheet(r.id, 'duration', e.target.value)} placeholder="60 min" style={{ borderRadius: 4, padding: '5px 6px', fontSize: 12 }} />
+            <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 100px 36px', borderBottom: '1px solid var(--border)', padding: '4px 8px', alignItems: 'center', gap: 4 }}>
+              <input defaultValue={r.time || ''} onBlur={e => updateRunsheet(r.id, 'time', e.target.value)} placeholder="19:00" style={{ fontSize: 13, borderRadius: 6, padding: '6px 8px' }} />
+              <input defaultValue={r.item || ''} onBlur={e => updateRunsheet(r.id, 'item', e.target.value)} placeholder="Item or performer" style={{ fontSize: 13, borderRadius: 6, padding: '6px 8px' }} />
+              <input defaultValue={r.duration || ''} onBlur={e => updateRunsheet(r.id, 'duration', e.target.value)} placeholder="60 min" style={{ fontSize: 13, borderRadius: 6, padding: '6px 8px' }} />
               <button onClick={() => deleteRunsheetRow(r.id)} style={{ color: 'var(--muted)', fontSize: 16, background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
             </div>
           ))}
@@ -418,107 +360,55 @@ export default function EventRecord() {
         <button className="btn" onClick={addRunsheetRow} style={{ alignSelf: 'flex-start' }}>+ Add row</button>
       </Section>
 
-      {/* Song requests */}
-      <Section id="songs" title="Song requests">
-        <div className="field">
-          <label>Written requests</label>
-          <textarea value={booking.song_requests || ''} onChange={e => setField('song_requests', e.target.value)} placeholder="List song titles..." />
+      <Section open={open} setOpen={setOpen} sid="songs" title="Song requests">
+        <div className="field"><label>Written requests</label><textarea value={booking.song_requests || ''} onChange={setField('song_requests')} onBlur={saveField('song_requests')} placeholder="List song titles..." /></div>
+        <div className="field"><label>Spotify playlist link</label><input value={booking.spotify_link || ''} onChange={setField('spotify_link')} onBlur={saveField('spotify_link')} placeholder="https://open.spotify.com/playlist/..." /></div>
+        <div className="field"><label>Do NOT play</label><textarea value={booking.do_not_play || ''} onChange={setField('do_not_play')} onBlur={saveField('do_not_play')} style={{ minHeight: 60 }} /></div>
+      </Section>
+
+      <Section open={open} setOpen={setOpen} sid="greenroom" title="Green room & logistics">
+        <div className="grid-2">
+          <div className="field"><label>Green room location</label><input value={booking.greenroom_location || ''} onChange={setField('greenroom_location')} onBlur={saveField('greenroom_location')} /></div>
+          <div className="field"><label>Access from</label><input type="time" value={booking.greenroom_access || ''} onChange={setField('greenroom_access')} onBlur={saveField('greenroom_access')} /></div>
+          <div className="field"><label>Crew meals (time & place)</label><input value={booking.crew_meals || ''} onChange={setField('crew_meals')} onBlur={saveField('crew_meals')} placeholder="7pm · Staff dining room" /></div>
+          <div className="field"><label>Table for DJ & power confirmed</label><input value={booking.dj_table_power || ''} onChange={setField('dj_table_power')} onBlur={saveField('dj_table_power')} placeholder="Stage right · 2× GPO" /></div>
         </div>
-        <div className="field">
-          <label>Spotify playlist link</label>
-          <input value={booking.spotify_link || ''} onChange={e => setField('spotify_link', e.target.value)} placeholder="https://open.spotify.com/playlist/..." />
-        </div>
-        <div className="field">
-          <label>Do NOT play</label>
-          <textarea value={booking.do_not_play || ''} onChange={e => setField('do_not_play', e.target.value)} style={{ minHeight: 52 }} />
+        <div className="field"><label>Green room details / rider items</label><textarea value={booking.greenroom_notes || ''} onChange={setField('greenroom_notes')} onBlur={saveField('greenroom_notes')} /></div>
+      </Section>
+
+      <Section open={open} setOpen={setOpen} sid="travel" title="Travel details">
+        <div className="field"><label>Travel & parking for performers</label><textarea value={booking.travel_notes || ''} onChange={setField('travel_notes')} onBlur={saveField('travel_notes')} placeholder="Load-in access, parking, directions..." /></div>
+        <div className="grid-2">
+          <div className="field"><label>Accommodation</label><input value={booking.accommodation || ''} onChange={setField('accommodation')} onBlur={saveField('accommodation')} /></div>
+          <div className="field"><label>Check-in time</label><input type="time" value={booking.checkin_time || ''} onChange={setField('checkin_time')} onBlur={saveField('checkin_time')} /></div>
         </div>
       </Section>
 
-      {/* Green room & logistics */}
-      <Section id="greenroom" title="Green room & logistics" badge={missingCount > 0 ? <span className="badge badge-warn">{missingCount} unresolved</span> : null}>
-        <div className="grid-2">
-          <div className="field">
-            <label>Green room location</label>
-            <input value={booking.greenroom_location || ''} onChange={e => setField('greenroom_location', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Green room access from</label>
-            <input type="time" value={booking.greenroom_access || ''} onChange={e => setField('greenroom_access', e.target.value)} />
-          </div>
-        </div>
-        <div className="field">
-          <label>Green room details / rider items</label>
-          <textarea value={booking.greenroom_notes || ''} onChange={e => setField('greenroom_notes', e.target.value)} />
-        </div>
-        <div className="grid-2">
-          <div className="field">
-            <label>Crew meals (time & place)</label>
-            <input value={booking.crew_meals || ''} onChange={e => setField('crew_meals', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>DJ table & power confirmed</label>
-            <input value={booking.dj_table_power || ''} onChange={e => setField('dj_table_power', e.target.value)} placeholder="Location + GPO points" />
-          </div>
-        </div>
-        <hr className="divider" />
-        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginBottom: 6 }}>CHECKLIST — WHAT'S MISSING</div>
-        {checklist.map(item => (
-          <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', borderBottom: '0.5px solid var(--border)' }}>
-            <div
-              onClick={() => toggleChecklistItem(item)}
-              style={{
-                width: 16, height: 16, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
-                border: `1.5px solid ${item.completed ? 'var(--green)' : 'var(--coral)'}`,
-                background: item.completed ? 'var(--green)' : 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', fontSize: 10,
-              }}
-            >
-              {item.completed ? '✓' : ''}
+      <Section open={open} setOpen={setOpen} sid="checklist" title="Booking checklist"
+        badge={<span style={{ fontSize: 12, fontWeight: 600, color: pct === 100 ? 'var(--teal-text)' : 'var(--gold-text)', background: pct === 100 ? 'var(--teal-bg)' : 'var(--gold-bg)', padding: '2px 10px', borderRadius: 99 }}>{checkedCount}/{totalCount}</span>}>
+        {Object.entries(checklistGroups).map(([group, items]) => (
+          <div key={group}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{group}</div>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', marginBottom: 14 }}>
+              {items.map((item, i) => {
+                const checked = !!booking[item.key]
+                return (
+                  <div key={item.key} onClick={() => toggleCheck(item.key)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: i < items.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', background: checked ? 'var(--teal-bg)' : 'var(--bg)', transition: 'background 0.15s' }}>
+                    <div style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0, border: `2px solid ${checked ? 'var(--teal)' : 'var(--border-mid)'}`, background: checked ? 'var(--teal)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12 }}>
+                      {checked ? '✓' : ''}
+                    </div>
+                    <span style={{ fontSize: 13, color: checked ? 'var(--teal-text)' : 'var(--text)', textDecoration: checked ? 'line-through' : 'none', fontWeight: checked ? 400 : 500 }}>{item.label}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: checked ? 'var(--teal-text)' : 'var(--terracotta)', fontWeight: 500 }}>{checked ? '✓ Done' : 'Pending'}</span>
+                  </div>
+                )
+              })}
             </div>
-            <input
-              value={item.label}
-              onChange={async e => {
-                const v = e.target.value
-                setChecklist(cs => cs.map(c => c.id === item.id ? { ...c, label: v } : c))
-                await supabase.from('checklist_items').update({ label: v }).eq('id', item.id)
-              }}
-              style={{ flex: 1, textDecoration: item.completed ? 'line-through' : 'none', color: item.completed ? 'var(--muted)' : 'var(--text)', fontSize: 13 }}
-            />
-            <input
-              value={item.owner || ''}
-              placeholder="Owner"
-              onChange={async e => {
-                const v = e.target.value
-                setChecklist(cs => cs.map(c => c.id === item.id ? { ...c, owner: v } : c))
-                await supabase.from('checklist_items').update({ owner: v }).eq('id', item.id)
-              }}
-              style={{ width: 100, fontSize: 12 }}
-            />
           </div>
         ))}
-        <button className="btn" onClick={addChecklistItem} style={{ alignSelf: 'flex-start' }}>+ Add item</button>
       </Section>
 
-      {/* Travel */}
-      <Section id="travel" title="Travel details">
-        <div className="field">
-          <label>Travel & parking notes for performers</label>
-          <textarea value={booking.travel_notes || ''} onChange={e => setField('travel_notes', e.target.value)} placeholder="Load-in access, parking, directions..." />
-        </div>
-        <div className="grid-2">
-          <div className="field">
-            <label>Accommodation (if applicable)</label>
-            <input value={booking.accommodation || ''} onChange={e => setField('accommodation', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Check-in time</label>
-            <input type="time" value={booking.checkin_time || ''} onChange={e => setField('checkin_time', e.target.value)} />
-          </div>
-        </div>
-      </Section>
-
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8, paddingBottom: 40 }}>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingBottom: 60 }}>
         <button className="btn" onClick={saveBooking} disabled={saving}>{saving ? 'Saving...' : 'Save all changes'}</button>
         <button className="btn btn-primary" onClick={generateCallSheet}>↓ Download call sheet</button>
       </div>
