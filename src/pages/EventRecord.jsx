@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import EmailButton from '../components/EmailButton'
-import { buildCallSheetEmail } from '../lib/email'
+import { downloadCallSheet, buildCallSheetEmail } from '../lib/callsheet'
 
 const STAGES = ['Enquiry','Logged','Calendar','Performers','Info complete','Call sheet sent','Done']
 const PERFORMER_TYPES = ['Solo act','Duo','Band','DJ','Roving / circus','Interactive','Other']
@@ -144,49 +144,7 @@ export default function EventRecord() {
     setRunsheet(rs => rs.filter(r => r.id !== rid))
   }
 
-  const generateCallSheet = () => {
-    if (!booking) return
-    const lines = [
-      `CALL SHEET — Byron Bay Experience`, `${'─'.repeat(46)}`,
-      `EVENT:      ${booking.client_name} — ${booking.event_type}`,
-      `VENUE:      ${booking.venue || '—'}`,
-      `DATE:       ${booking.event_date ? new Date(booking.event_date).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '—'}`,
-      `PAX:        ${booking.pax || '—'} guests`,
-      `DRESS CODE: ${booking.dress_code || '—'}`, ``,
-      `ON THE DAY: ${booking.on_day_contact || 'Renee · 0403 769 229'}`, ``,
-      `ACT BOOKED: ${booking.act_booked || '—'}`, ``,
-      `NEED TO BRING`, booking.need_to_bring || '—', ``,
-      `NEED TO LEARN`, booking.need_to_learn || '—', ``,
-      `${'─'.repeat(20)} PERFORMERS ${'─'.repeat(15)}`,
-      ...performers.map(p => `${p.name} — ${p.type}  |  ${(p.status || 'NR').toUpperCase()}  |  Fee: $${p.fee || '—'}  |  ${p.time_slot || ''}`), ``,
-      `${'─'.repeat(20)} SCHEDULE ${'─'.repeat(17)}`,
-      `BUMP IN:    ${booking.bump_in_time || '—'}`,
-      `GUESTS ARR: ${booking.guest_arrival_time || '—'}`, ``,
-      ...runsheet.map(r => `${(r.time || '—').padEnd(9)} ${r.item}${r.duration ? ` (${r.duration})` : ''}`), ``,
-      `${'─'.repeat(20)} CLIENT CONTACT ${'─'.repeat(11)}`,
-      `Name:  ${booking.client_contact_name || '—'}`,
-      `Email: ${booking.client_email || '—'}`,
-      `Phone: ${booking.client_phone || '—'}`,
-      `About: ${booking.about_client || '—'}`, ``,
-      `${'─'.repeat(20)} GREEN ROOM ${'─'.repeat(16)}`,
-      booking.greenroom_location || '—', booking.greenroom_notes || '', ``,
-      `CREW MEALS: ${booking.crew_meals || '—'}`,
-      `DJ TABLE:   ${booking.dj_table_power || '—'}`, ``,
-      `${'─'.repeat(20)} SONG REQUESTS ${'─'.repeat(13)}`,
-      booking.song_requests || '—',
-      booking.spotify_link ? `Spotify: ${booking.spotify_link}` : '',
-      booking.do_not_play ? `Do not play: ${booking.do_not_play}` : '', ``,
-      `${'─'.repeat(20)} TRAVEL ${'─'.repeat(19)}`,
-      booking.travel_notes || '—', `${'─'.repeat(46)}`,
-    ]
-    const missing = DEFAULT_CHECKLIST.filter(c => !booking[c.key])
-    if (missing.length > 0) lines.push(``, `⚠  STILL MISSING:`, ...missing.map(m => `   • ${m.label}`))
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `call-sheet-${(booking.client_name || 'event').replace(/\s+/g, '-').toLowerCase()}.txt`
-    a.click()
-  }
+  const generateCallSheet = () => downloadCallSheet(booking, performers)
 
   if (!booking) return <div style={{ padding: 60, textAlign: 'center', color: 'var(--muted)' }}>Loading...</div>
 
@@ -303,7 +261,8 @@ export default function EventRecord() {
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>$</span>
                   <input type="number" defaultValue={p.fee || ''} onBlur={e => updatePerformer(p.id, 'fee', e.target.value)} placeholder="Fee" style={{ width: 70, fontSize: 13 }} />
                 </div>
-                <button onClick={() => deletePerformer(p.id)} style={{ color: 'var(--muted)', fontSize: 18, background: 'none', border: 'none', cursor: 'pointer', marginLeft: 'auto' }}>×</button>
+                <button onClick={() => downloadCallSheet(booking, performers, p)} title="Download this performer's call sheet" style={{ color: 'var(--terracotta)', fontSize: 12, background: 'none', border: '1px solid var(--terracotta)', borderRadius: 6, cursor: 'pointer', marginLeft: 'auto', padding: '3px 8px', fontWeight: 500 }}>↓ Call sheet</button>
+                <button onClick={() => deletePerformer(p.id)} style={{ color: 'var(--muted)', fontSize: 18, background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
               </div>
             )
           })}

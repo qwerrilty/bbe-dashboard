@@ -1,6 +1,12 @@
 import { FEATURES } from './config'
 import { supabase } from './supabase'
 
+// ============================================
+// Email service — DISABLED via FEATURES.EMAIL_ENABLED
+// When ready: build a Supabase Edge Function "send-email"
+// and set EMAIL_ENABLED = true in lib/config.js
+// ============================================
+
 export async function sendEmail({ to, subject, body, bookingId, type = 'custom' }) {
   if (!FEATURES.EMAIL_ENABLED) {
     console.info('[email disabled] Would send:', { to, subject, type })
@@ -10,7 +16,7 @@ export async function sendEmail({ to, subject, body, bookingId, type = 'custom' 
         subject, body, booking_id: bookingId || null,
         type, status: 'queued_disabled',
       }])
-    } catch (e) { /* table may not exist yet — ignore */ }
+    } catch (e) { /* table may not exist yet */ }
     return { ok: false, disabled: true }
   }
 
@@ -28,21 +34,4 @@ export async function sendEmail({ to, subject, body, bookingId, type = 'custom' 
   } catch (err) {
     return { ok: false, error: err.message }
   }
-}
-
-export function buildCallSheetEmail(booking, performers = []) {
-  const subject = `Call Sheet — ${booking.client_name} — ${booking.event_date ? new Date(booking.event_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : 'TBC'}`
-  const body = [
-    `Hi team,`, ``,
-    `Here are the details for ${booking.client_name} — ${booking.event_type}.`, ``,
-    `VENUE: ${booking.venue || 'TBC'}`,
-    `DATE: ${booking.event_date ? new Date(booking.event_date).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : 'TBC'}`,
-    `BUMP IN: ${booking.bump_in_time || 'TBC'}`,
-    `GUESTS ARRIVE: ${booking.guest_arrival_time || 'TBC'}`,
-    `DRESS CODE: ${booking.dress_code || 'TBC'}`, ``,
-    `ON THE DAY CONTACT: ${booking.on_day_contact || 'Renee · 0403 769 229'}`, ``,
-    `Please confirm your availability by accepting this email.`, ``,
-    `Thanks,`, `Byron Bay Experience`,
-  ].join('\n')
-  return { subject, body }
 }
