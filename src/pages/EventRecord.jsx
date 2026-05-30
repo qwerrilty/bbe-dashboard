@@ -5,6 +5,23 @@ import { supabase } from '../lib/supabase'
 import EmailButton from '../components/EmailButton'
 import { buildCallSheetEmail } from '../lib/email'
 
+function Section({ sid, title, badge, open, setOpen, children }) {
+  const isOpen = open[sid] !== false
+  return (
+    <div className="card" style={{ marginBottom: 14, overflow: 'visible' }}>
+      <div onClick={() => setOpen(o => ({ ...o, [sid]: !isOpen }))}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 20px', borderBottom: isOpen ? '1px solid var(--border)' : 'none', background: 'var(--bg2)', borderRadius: isOpen ? '14px 14px 0 0' : 14, cursor: 'pointer', userSelect: 'none' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{title}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {badge}
+          <span style={{ color: 'var(--muted)', fontSize: 18, transform: isOpen ? '' : 'rotate(-90deg)', display: 'inline-block', transition: 'transform 0.2s' }}>⌄</span>
+        </div>
+      </div>
+      {isOpen && <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>{children}</div>}
+    </div>
+  )
+}
+
 const STAGES = ['Enquiry', 'Logged to Sheets', 'Calendar created', 'Performers locked', 'Info complete', 'Call sheet sent', 'Done']
 const PERFORMER_TYPES = ['Solo act', 'Duo', 'Band', 'DJ', 'Roving / circus', 'Interactive', 'Other']
 
@@ -159,24 +176,7 @@ export default function EventRecord() {
   const statusBg = { yes: 'var(--green-bg)', no: 'var(--coral-bg)', nr: 'var(--gold-bg)' }
   const statusText = { yes: 'var(--green-text)', no: 'var(--coral-text)', nr: 'var(--gold-text)' }
 
-  const Section = ({ id: sid, title, badge, children }) => {
-    const open = activeSection !== sid
-    return (
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 18px', borderBottom: open ? '0.5px solid var(--border)' : 'none', background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' }}
-          onClick={() => setActiveSection(activeSection === sid ? null : sid)}
-        >
-          <div style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>{title}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {badge}
-            <span style={{ color: 'var(--muted)', fontSize: 16, transform: open ? '' : 'rotate(-90deg)', display: 'inline-block', transition: 'transform 0.2s' }}>⌄</span>
-          </div>
-        </div>
-        {open && <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>{children}</div>}
-      </div>
-    )
-  }
+  
 
   if (!booking) return <div style={{ padding: 40, color: 'var(--muted)', fontSize: 13 }}>Loading...</div>
 
